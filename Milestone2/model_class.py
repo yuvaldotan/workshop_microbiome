@@ -44,7 +44,7 @@ class BaboonModel:
 
             D_t1 = self.normalized_data[1:-1].values
             D_mean = self.df_cumulative_mean[:-2].values
-            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)/2+0.5
+            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)
             exp = np.exp(-lambda_*self.delta_t[2:].values)
 
             f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
@@ -115,7 +115,7 @@ class superModel:
         
         # optimise lambda using scipy.optimize.minimize
         
-        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(-1,1)], tol=1e-6)
+        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(0,1)], tol = 1e-3)
 
         self.lambda_ = optimezed_lambda.x
         
@@ -137,7 +137,7 @@ def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         D_t1 = np.repeat(clr_normalization(known_data)[-1].values, len(delta_t)).reshape(-1,len(delta_t))
         D_mean = np.repeat(clr_normalization(known_data)[:-2].mean().values, len(delta_t)).reshape(-1,len(delta_t))
 
-        cos = np.cos((2*np.pi*delta_t)/365)/2 + 0.5
+        cos = np.cos((2*np.pi*delta_t)/365)
         exp = np.exp(-lambda_*delta_t)
         f = alpha@(exp*cos*D_t1) + beta@((1-exp*cos)*D_mean)
         
