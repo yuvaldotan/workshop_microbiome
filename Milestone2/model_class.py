@@ -17,6 +17,7 @@ class BaboonModel:
     def __init__(self, baboon_id, data, metadata):
         self.baboon_id = baboon_id
         self.alpha_ = np.zeros((61,61))
+        self.beta_ = np.zeros((61,61))
         self.data = data
         self.metadata = metadata
         self.normalized_data = clr_normalization(self.data)
@@ -25,7 +26,7 @@ class BaboonModel:
     
     def fit(self, lambda_):
         # calculate optimised alpha for a given lambda
-        def objective(alpha, lambda_):
+        def objective(alpha_beta, lambda_):
             # calculate the objective function
 
             '''for the ith row in self.data (from row 3)
@@ -37,14 +38,16 @@ class BaboonModel:
             '''
             calculate difference between prediction and actual value using bray-curtis dissimilarity and return the sum/mean -TBD'''
 
-            alpha = alpha.reshape(61,-1)
+            alpha = alpha_beta[:61*61].reshape(61,-1)
+            beta = alpha_beta[61*61:].reshape(61,-1)
+
 
             D_t1 = self.normalized_data[1:-1].values
             D_mean = self.df_cumulative_mean[:-2].values
-            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)
+            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)/2+0.5
             exp = np.exp(-lambda_*self.delta_t[2:].values)
 
-            f = alpha@(exp*cos*D_t1.T) + (1-alpha)@(exp*cos*D_mean.T)
+            f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
 
             f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
 
@@ -56,8 +59,11 @@ class BaboonModel:
         
         # optimise alpha using scipy.optimize.minimize
         
-        optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = self.alpha_.flatten(), method="L-BFGS-B", bounds=[(-1,1)]*(61*61))
-        self.alpha_ = optimezed_alpha.x.reshape(61,-1)
+        optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2))
+
+        self.alpha_ = optimezed_alpha.x[:61*61].reshape(61,-1)
+        self.beta_ = optimezed_alpha.x[61*61:].reshape(61,-1)
+
 
         return self.alpha_, optimezed_alpha.fun       
 
@@ -65,7 +71,7 @@ class BaboonModel:
     def predict(self, other, lambda_):
         known_data = other.data
         known_metadata = other.metadata
-        return non_iterative_predictor(known_data, known_metadata, self.alpha_, lambda_)
+        return non_iterative_predictor(known_data, known_metadata, self.alpha_, self.beta_, lambda_)
 
 
 class superModel:
@@ -109,7 +115,7 @@ class superModel:
         
         # optimise lambda using scipy.optimize.minimize
         
-        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(0,1)], tol=1e-3)
+        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(-1,1)], tol=1e-6)
 
         self.lambda_ = optimezed_lambda.x
         
@@ -124,16 +130,16 @@ class superModel:
         return predictions
 
 
-def non_iterative_predictor(known_data, known_metadata, alpha,lambda_):
+def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         # calculate time difference between the last known sample and the unknown samples
         delta_t = known_metadata['collection_date'][len(known_data):] - known_metadata['collection_date'][len(known_data)-1]
         # calculate the prediction for the unknown samples using the formula
         D_t1 = np.repeat(clr_normalization(known_data)[-1].values, len(delta_t)).reshape(-1,len(delta_t))
         D_mean = np.repeat(clr_normalization(known_data)[:-2].mean().values, len(delta_t)).reshape(-1,len(delta_t))
 
-        cos = np.cos((2*np.pi*delta_t)/365)
+        cos = np.cos((2*np.pi*delta_t)/365)/2 + 0.5
         exp = np.exp(-lambda_*delta_t)
-        f = alpha@(exp*cos*D_t1) + (1-alpha)@(exp*cos*D_mean)
+        f = alpha@(exp*cos*D_t1) + beta@((1-exp*cos)*D_mean)
         
         # TODO: should we return the softmax or the CLR values?
         f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
@@ -144,6 +150,6 @@ if __name__ == "__main__":
     data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
     metadata_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_metadata.csv"
     model = superModel(data_path, metadata_path)
-    model.baboons = model.baboons[0:3]
+    model.baboons = [model.baboons[0]]
     model.fit()
     print(model.lambda_)
