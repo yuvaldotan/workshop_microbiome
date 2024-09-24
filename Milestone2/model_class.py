@@ -5,8 +5,10 @@ import math
 from scipy.special import softmax
 from scipy.optimize import minimize
 from scipy.spatial.distance import braycurtis
-#sys.path.insert(0, r'C:\Users\tomer\Desktop\year3\sem B\workshop_microbiome\code')
-sys.path.insert(0, r'C:\Users\yuvald\Documents\Uni\סמסטר ב\workshop_microbiome\code')
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
+sys.path.insert(0, r'C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\code')
+# sys.path.insert(0, r'C:\Users\yuvald\Documents\Uni\סמסטר ב\workshop_microbiome\code')
 
 from imports import *
 
@@ -23,7 +25,6 @@ class BaboonModel:
     
     def fit(self, lambda_):
         # calculate optimised alpha for a given lambda
-
         def objective(alpha, lambda_):
             # calculate the objective function
 
@@ -48,21 +49,23 @@ class BaboonModel:
             f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
 
             # calculate bray-curtis dissimilarity
-            bc = braycurtis(self.data[2:], f)
+            bc =  np.array([braycurtis(self.data.values[i+2], f[i]) for i in range(len(f))])
 
             return bc.mean()
 
         
         # optimise alpha using scipy.optimize.minimize
-        print(self.alpha_.flatten().ndim)
+        
         optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = self.alpha_.flatten(), method="L-BFGS-B", bounds=[(-1,1)]*(61*61))
         self.alpha_ = optimezed_alpha.x.reshape(61,-1)
 
         return self.alpha_, optimezed_alpha.fun       
 
 
-    def predict(self, known_data, known_metadata, lambda_):
-        return ditribution_function(known_data, known_metadata, self.alpha_, lambda_)
+    def predict(self, other, lambda_):
+        known_data = other.data
+        known_metadata = other.metadata
+        return non_iterative_predictor(known_data, known_metadata, self.alpha_, lambda_)
 
 
 class superModel:
@@ -85,17 +88,31 @@ class superModel:
             # calculate the objective function
             lambda_ = lambda_[0]
             sum = 0
-            # TODO: parallelize
-            for baboon in self.baboons:
-                alpha, bc = baboon.fit(lambda_)
-                sum += bc
+            futures = []
+            cpus = multiprocessing.cpu_count() - 2
+
+            with ProcessPoolExecutor(cpus) as executor:
+                for baboon in self.baboons:
+                    fut = executor.submit(baboon.fit, lambda_)
+                    futures.append(fut)
+            
+            for fut in futures:
+                alpha, bc = fut.result()
+                sum += bc/len(self.baboons)
+
+
+            # for baboon in self.baboons:
+            #     alpha, bc = baboon.fit(lambda_)
+            #     sum += bc
+            print(f"for lambda = {lambda_} the objective function is {sum}")
             return sum
         
         # optimise lambda using scipy.optimize.minimize
-        print(self.lambda_)
-        optimezed_lambda = minimize(lambda l: objective(l), x0 = [self.lambda_], method="L-BFGS-B")
-        print(optimezed_lambda.x)
+        
+        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(0,1)], tol=1e-3)
+
         self.lambda_ = optimezed_lambda.x
+        
         return objective(self.lambda_)
 
     def predict(self,  known_data, known_metadata, lambda_):
@@ -107,7 +124,7 @@ class superModel:
         return predictions
 
 
-def ditribution_function(known_data, known_metadata, alpha,lambda_):
+def non_iterative_predictor(known_data, known_metadata, alpha,lambda_):
         # calculate time difference between the last known sample and the unknown samples
         delta_t = known_metadata['collection_date'][len(known_data):] - known_metadata['collection_date'][len(known_data)-1]
         # calculate the prediction for the unknown samples using the formula
@@ -117,6 +134,16 @@ def ditribution_function(known_data, known_metadata, alpha,lambda_):
         cos = np.cos((2*np.pi*delta_t)/365)
         exp = np.exp(-lambda_*delta_t)
         f = alpha@(exp*cos*D_t1) + (1-alpha)@(exp*cos*D_mean)
+        
+        # TODO: should we return the softmax or the CLR values?
         f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
 
         return f
+
+if __name__ == "__main__":
+    data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
+    metadata_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_metadata.csv"
+    model = superModel(data_path, metadata_path)
+    model.baboons = [model.baboons[0]]
+    model.fit()
+    print(model.lambda_)
