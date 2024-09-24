@@ -89,7 +89,7 @@ class superModel:
             lambda_ = lambda_[0]
             sum = 0
             futures = []
-            cpus = multiprocessing.cpu_count() - 2
+            cpus = max(1, min(multiprocessing.cpu_count() - 2, len(self.baboons)))
 
             with ProcessPoolExecutor(cpus) as executor:
                 for baboon in self.baboons:
@@ -144,6 +144,6 @@ if __name__ == "__main__":
     data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
     metadata_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_metadata.csv"
     model = superModel(data_path, metadata_path)
-    model.baboons = [model.baboons[0]]
+    model.baboons = model.baboons[0:3]
     model.fit()
     print(model.lambda_)
