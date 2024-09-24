@@ -59,7 +59,7 @@ class BaboonModel:
         
         # optimise alpha using scipy.optimize.minimize
         
-        optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2))
+        optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2), tol = 1e-3)
 
         self.alpha_ = optimezed_alpha.x[:61*61].reshape(61,-1)
         self.beta_ = optimezed_alpha.x[61*61:].reshape(61,-1)
