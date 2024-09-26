@@ -12,6 +12,7 @@ sys.path.insert(0, r'C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\
 
 from imports import *
 
+method = 'clr'
 
 class BaboonModel:
     def __init__(self, baboon_id, data, metadata):
@@ -20,8 +21,8 @@ class BaboonModel:
         self.beta_ = np.zeros((61,61))
         self.data = data
         self.metadata = metadata
-        self.normalized_data = clr_normalization(self.data)
-        self.df_cumulative_mean = self.normalized_data.expanding().mean()
+        self.transformed_data = transformation(self.data, type = method)
+        self.df_cumulative_mean = self.transformed_data.expanding().mean()
         self.delta_t = self.metadata['collection_date'].diff()
     
     def fit(self, lambda_):
@@ -42,14 +43,14 @@ class BaboonModel:
             beta = alpha_beta[61*61:].reshape(61,-1)
 
 
-            D_t1 = self.normalized_data[1:-1].values
+            D_t1 = self.transformed_data[1:-1].values
             D_mean = self.df_cumulative_mean[:-2].values
             cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)
             exp = np.exp(-lambda_*self.delta_t[2:].values)
 
             f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
 
-            f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
+            f = to_composition(f.T, type = method) # transpose f to match the shape of D - each row is a sample
 
             # calculate bray-curtis dissimilarity
             bc =  np.array([braycurtis(self.data.values[i+2], f[i]) for i in range(len(f))])
@@ -59,13 +60,13 @@ class BaboonModel:
         
         # optimise alpha using scipy.optimize.minimize
         
-        optimezed_alpha = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2), tol = 1e-3)
+        optimezed_score = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2), tol = 1e-3)
 
-        self.alpha_ = optimezed_alpha.x[:61*61].reshape(61,-1)
-        self.beta_ = optimezed_alpha.x[61*61:].reshape(61,-1)
+        self.alpha_ = optimezed_score.x[:61*61].reshape(61,-1)
+        self.beta_ = optimezed_score.x[61*61:].reshape(61,-1)
 
 
-        return self.alpha_, optimezed_alpha.fun       
+        return self.alpha_, self.beta_, optimezed_score.fun       
 
 
     def predict(self, other, lambda_):
@@ -134,15 +135,15 @@ def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         # calculate time difference between the last known sample and the unknown samples
         delta_t = known_metadata['collection_date'][len(known_data):] - known_metadata['collection_date'][len(known_data)-1]
         # calculate the prediction for the unknown samples using the formula
-        D_t1 = np.repeat(clr_normalization(known_data)[-1].values, len(delta_t)).reshape(-1,len(delta_t))
-        D_mean = np.repeat(clr_normalization(known_data)[:-2].mean().values, len(delta_t)).reshape(-1,len(delta_t))
+        D_t1 = np.repeat(transformation(known_data)[-1].values, len(delta_t)).reshape(-1,len(delta_t), type = method)
+        D_mean = np.repeat(transformation(known_data)[:-2].mean().values, len(delta_t)).reshape(-1,len(delta_t), type = method)
 
         cos = np.cos((2*np.pi*delta_t)/365)
         exp = np.exp(-lambda_*delta_t)
         f = alpha@(exp*cos*D_t1) + beta@((1-exp*cos)*D_mean)
         
-        # TODO: should we return the softmax or the CLR values?
-        f = softmax(f.T, axis = 1) # transpose f to match the shape of D - each row is a sample
+        # TODO: should we return the normalized or the transformes values?
+        f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
 
         return f
 
@@ -150,6 +151,6 @@ if __name__ == "__main__":
     data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
     metadata_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_metadata.csv"
     model = superModel(data_path, metadata_path)
-    model.baboons = [model.baboons[0]]
+    model.baboons = model.baboons[:3]
     model.fit()
     print(model.lambda_)
