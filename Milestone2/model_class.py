@@ -45,7 +45,7 @@ class BaboonModel:
 
             D_t1 = self.transformed_data[1:-1].values
             D_mean = self.df_cumulative_mean[:-2].values
-            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365)
+            cos = 0# np.cos((2*np.pi*self.delta_t[2:].values)/365)
             exp = np.exp(-lambda_*self.delta_t[2:].values)
 
             f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
@@ -124,10 +124,28 @@ class superModel:
 
     def predict(self,  known_data, known_metadata, lambda_):
         # TODO: calculate weights
-        weights = np.array([1/len(self.baboons)]*len(self.baboons))
+        wights = np.zeros([len(self.baboons),len(known_metadata[len(known_data):])])
+
+        #weights = np.array([1/len(self.baboons)]*len(self.baboons))
+        
+        for i, baboon in enumerate(self.baboons):
+            x = baboon_similarity(baboon.metadata, known_metadata[len(known_data):])
+            if x.zero
+
+
+            wights[i]
+
         predictions = []
         for baboon in self.baboons:
             predictions.append(baboon.predict(known_data, known_metadata, lambda_))
+        
+
+
+        res = []
+        for pred in predictions:
+            for baboon_pred in pred:
+                
+            
         return predictions
 
 
@@ -146,6 +164,20 @@ def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
 
         return f
+
+
+def baboon_similarity(baboon1, baboon2):
+    # score based on social group similarity
+    # option1: for each sample in baboon2, take baboon1 if it was in baboon2's social group
+    # option2: take the relative part of presence in the social group
+
+    social_groups_baboon1 = set(baboon1['social_group'])
+
+    # Create the 0/1 list based on presence of social group in baboon1
+    presence_list = [1 if group in social_groups_baboon1 else 0 for group in baboon2['social_group']]
+
+    return presence_list
+
 
 if __name__ == "__main__":
     data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
