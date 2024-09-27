@@ -24,6 +24,7 @@ def counts_transformation(df):
     counts = np.random.choice(pd.read_csv(r"count.csv", index_col="library_name")["read_count"].values, len(df.index), replace=True)
     dataf = df.copy()
     dataf =dataf.multiply(counts, axis=0)
+
     return dataf
 
 def to_composition(arr, type = 'counts'):

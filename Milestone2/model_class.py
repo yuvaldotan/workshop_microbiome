@@ -7,7 +7,7 @@ from scipy.optimize import minimize
 from scipy.spatial.distance import braycurtis
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
-sys.path.insert(0, r'C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\code')
+# sys.path.insert(0, r'C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\code')
 # sys.path.insert(0, r'C:\Users\yuvald\Documents\Uni\סמסטר ב\workshop_microbiome\code')
 
 from imports import *
@@ -69,10 +69,9 @@ class BaboonModel:
         return self.alpha_, self.beta_, optimezed_score.fun       
 
 
-    def predict(self, other, lambda_):
-        known_data = other.data
-        known_metadata = other.metadata
-        return non_iterative_predictor(known_data, known_metadata, self.alpha_, self.beta_, lambda_)
+    def predict(self, other_data, other_metadata, weights,lambda_):
+        
+        return (non_iterative_predictor(other_data, other_metadata, self.alpha_, self.beta_, lambda_).T * weights).T
 
 
 class superModel:
@@ -122,43 +121,43 @@ class superModel:
         
         return objective(self.lambda_)
 
-    def predict(self,  known_data, known_metadata, lambda_):
+    def predict(self,  known_data, known_metadata):
         # TODO: calculate weights
-        wights = np.zeros([len(self.baboons),len(known_metadata[len(known_data):])])
+        weights = np.zeros((len(self.baboons),len(known_metadata[len(known_data):])))
+        # weights = np.array([1/len(self.baboons)]*len(self.baboons))
 
-        #weights = np.array([1/len(self.baboons)]*len(self.baboons))
-        
         for i, baboon in enumerate(self.baboons):
-            x = baboon_similarity(baboon.metadata, known_metadata[len(known_data):])
-            if x.zero
+            weights[i,:] = baboon_similarity(baboon.metadata, known_metadata[len(known_data):])
+
+        weights = weights.T
+
+        for i in range(len(weights)):
+            if weights[i].sum() == 0:
+                weights[i] = np.array([1/len(self.baboons)]*len(self.baboons))
+            else:
+                weights[i] = weights[i]/weights[i].sum()
 
 
-            wights[i]
-
-        predictions = []
-        for baboon in self.baboons:
-            predictions.append(baboon.predict(known_data, known_metadata, lambda_))
-        
-
-
-        res = []
-        for pred in predictions:
-            for baboon_pred in pred:
-                
+        predictions = np.zeros((len(known_metadata[len(known_data):]), 61))
+        for i in range(len(self.baboons)):
+            predictions += baboon.predict(known_data, known_metadata, weights[:,i], self.lambda_)
             
         return predictions
 
-
 def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         # calculate time difference between the last known sample and the unknown samples
-        delta_t = known_metadata['collection_date'][len(known_data):] - known_metadata['collection_date'][len(known_data)-1]
+                
+        delta_t = known_metadata['collection_date'].values[len(known_data):] - known_metadata['collection_date'].values[len(known_data)-1]
         # calculate the prediction for the unknown samples using the formula
-        D_t1 = np.repeat(transformation(known_data)[-1].values, len(delta_t)).reshape(-1,len(delta_t), type = method)
-        D_mean = np.repeat(transformation(known_data)[:-2].mean().values, len(delta_t)).reshape(-1,len(delta_t), type = method)
+
+        D_t1 = np.repeat(transformation(known_data, type = method).values[-1], len(delta_t)).reshape(-1,len(delta_t)).T
+
+        
+        D_mean = np.repeat(np.mean(transformation(known_data, type = method).values[:-2], axis = 0), len(delta_t)).reshape(-1,len(delta_t)).T
 
         cos = np.cos((2*np.pi*delta_t)/365)
         exp = np.exp(-lambda_*delta_t)
-        f = alpha@(exp*cos*D_t1) + beta@((1-exp*cos)*D_mean)
+        f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
         
         # TODO: should we return the normalized or the transformes values?
         f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
