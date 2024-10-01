@@ -28,8 +28,7 @@ def counts_transformation(df):
     return dataf
 
 def to_composition(arr, type = 'counts'):
-
     if type == 'clr':
-        return softmax(arr , axis = 1)
+        return softmax(arr)
     if type == 'counts':
         return arr/arr.sum(axis=1).reshape(-1,1)

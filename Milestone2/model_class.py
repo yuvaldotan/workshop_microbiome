@@ -12,13 +12,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from imports import *
 
-method = 'clr'
+method = 'counts'
 
 class BaboonModel:
     def __init__(self, baboon_id, data, metadata):
         self.baboon_id = baboon_id
         self.alpha_ = np.zeros((61,61))
-        self.beta_ = np.zeros((61,61))
+        self.beta_ = np.eye(61,61)
         self.data = data
         self.metadata = metadata
         self.transformed_data = transformation(self.data, type = method)
@@ -60,7 +60,7 @@ class BaboonModel:
         
         # optimise alpha using scipy.optimize.minimize
         
-        optimezed_score = minimize(lambda a: objective(a,lambda_), x0 = [0]*(61*61*2), method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2), tol = 1e-3)
+        optimezed_score = minimize(lambda a: objective(a,lambda_), x0 = self.alpha_.flatten().tolist() + self.beta_.flatten().tolist() , method="L-BFGS-B", bounds=[(-1,1)]*(61*61*2), tol = 1e-3)
 
         self.alpha_ = optimezed_score.x[:61*61].reshape(61,-1)
         self.beta_ = optimezed_score.x[61*61:].reshape(61,-1)
@@ -103,7 +103,7 @@ class superModel:
                     futures.append(fut)
             
             for fut in futures:
-                alpha, bc = fut.result()
+                alpha, beta,  bc = fut.result()
                 sum += bc/len(self.baboons)
 
 
