@@ -4,7 +4,7 @@ from scipy.special import softmax
 
 def transformation(df, type = 'counts'):
     
-    return {'clr':clr_transformation(df), 'counts':counts_transformation(df)}[type]
+    return {'clr':clr_transformation, 'counts':counts_transformation}[type](df)
 
 def clr_transformation(df):
     dataf = df.copy()
@@ -31,4 +31,6 @@ def to_composition(arr, type = 'counts'):
     if type == 'clr':
         return softmax(arr)
     if type == 'counts':
+        if arr.ndim == 1:
+            return arr/arr.sum()
         return arr/arr.sum(axis=1).reshape(-1,1)

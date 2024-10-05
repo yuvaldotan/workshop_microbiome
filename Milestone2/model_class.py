@@ -69,8 +69,9 @@ class BaboonModel:
         return self.alpha_, self.beta_, optimezed_score.fun       
 
 
-    def predict(self, other_data, other_metadata, weights,lambda_):
-        
+    def predict(self, other_data, other_metadata, weights,lambda_, iterative = False):
+        if iterative:
+            return iterative_predictor(other_data, other_metadata, self.alpha_, self.beta_, lambda_)*weights
         return (non_iterative_predictor(other_data, other_metadata, self.alpha_, self.beta_, lambda_).T * weights).T
 
 
@@ -119,8 +120,7 @@ class superModel:
         
         return objective(self.lambda_)
 
-    def predict(self,  known_data, known_metadata):
-        # TODO: calculate weights
+    def predict(self,  known_data, known_metadata, iterative = False):
         weights = np.zeros((len(self.baboons),len(known_metadata[len(known_data):])))
         # weights = np.array([1/len(self.baboons)]*len(self.baboons))
 
@@ -137,9 +137,18 @@ class superModel:
 
 
         predictions = np.zeros((len(known_metadata[len(known_data):]), 61))
-        for i in range(len(self.baboons)):
-            predictions += baboon.predict(known_data, known_metadata, weights[:,i], self.lambda_)
-            
+        if not iterative:
+            for i in range(len(self.baboons)):
+                predictions += baboon.predict(known_data, known_metadata, weights[:,i], self.lambda_)
+        else:
+            n = len(known_data)
+            for j in range(len(known_data), len(known_metadata)):
+                for i in range(len(self.baboons)):
+                    predictions[j-n] += baboon.predict(known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
+                known_data = known_data.append(pd.Series(predictions[j-n], index = known_data.columns), ignore_index = True)
+        
+        # pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata[len(known_data):].index)
+
         return predictions
 
 def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
@@ -147,15 +156,39 @@ def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
                 
         delta_t = known_metadata['collection_date'].values[len(known_data):] - known_metadata['collection_date'].values[len(known_data)-1]
         # calculate the prediction for the unknown samples using the formula
-
+        
         D_t1 = np.repeat(transformation(known_data, type = method).values[-1], len(delta_t)).reshape(-1,len(delta_t)).T
 
-        
-        D_mean = np.repeat(np.mean(transformation(known_data, type = method).values[:-2], axis = 0), len(delta_t)).reshape(-1,len(delta_t)).T
+        if len(known_data)<=2:
+            D_mean = np.repeat(transformation(known_data, type = method).values[0], len(delta_t)).reshape(-1,len(delta_t)).T
+        else:
+            D_mean = np.repeat(np.mean(transformation(known_data, type = method).values[:-2], axis = 0), len(delta_t)).reshape(-1,len(delta_t)).T
 
         cos = np.cos((2*np.pi*delta_t)/365)
         exp = np.exp(-lambda_*delta_t)
         f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
+        
+        # TODO: should we return the normalized or the transformes values?
+        f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
+
+        return f
+
+
+def iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
+        # calculate time difference between the last known sample and the unknown samples
+                
+        delta_t = known_metadata['collection_date'].values[len(known_data)] - known_metadata['collection_date'].values[len(known_data)-1]
+        # calculate the prediction for the unknown samples using the formula
+
+        D_t1 = transformation(known_data, type = method).values[-1]
+        if len(known_data)<=2:
+            D_mean = transformation(known_data, type = method).values[0]
+        else:
+            D_mean = np.mean(transformation(known_data, type = method).values[:-2], axis = 0)
+
+        cos = np.cos((2*np.pi*delta_t)/365)
+        exp = np.exp(-lambda_*delta_t)
+        f = (exp*cos*D_t1)@alpha + ((1-exp*cos)*D_mean.T)@beta
         
         # TODO: should we return the normalized or the transformes values?
         f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
@@ -191,7 +224,7 @@ def preprocessing(data_path, metadata_path):
     metadata_clean = metadata_df[metadata_df["sample"].isin(chosen_samples)]
     metadata_clean.set_index('sample', inplace=True)
     data_clean.set_index('sample', inplace=True)
-    metadata_df["collection_date"] = (pd.to_datetime(metadata_df['collection_date']) - pd.Timestamp('1970-01-01')).dt.days
+    metadata_clean["collection_date"] = (pd.to_datetime(metadata_clean['collection_date']) - pd.Timestamp('1970-01-01')).dt.days
     return metadata_clean, data_clean
     
 
@@ -200,6 +233,16 @@ if __name__ == "__main__":
     data_path = r"train_data.csv"
     metadata_path = r"train_metadata.csv"
     model = superModel(data_path, metadata_path)
-    model.baboons = model.baboons[:3]
-    model.fit()
+    # model.baboons = model.baboons[:3]
+    # model.fit()
     print(model.lambda_)
+    for baboon in model.baboons:
+        baboon.alpha_ = np.zeros([61,61])
+        baboon.beta_ = np.eye(61,61)
+    baboons = model.baboons
+    model.baboons = model.baboons[:60]
+    Baboon_78 = baboons[-2]
+    baboon_78_data = Baboon_78.data[2:]
+    Baboon_78.data = Baboon_78.data[:2]
+    iterative_res = model.predict(Baboon_78.data, Baboon_78.metadata, iterative=True)
+    noninterative_res = model.predict(Baboon_78.data, Baboon_78.metadata, iterative=False)
