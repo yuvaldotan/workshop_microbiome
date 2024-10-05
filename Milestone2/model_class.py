@@ -137,17 +137,18 @@ class superModel:
 
 
         predictions = np.zeros((len(known_metadata[len(known_data):]), 61))
+        n = len(known_data)
         if not iterative:
             for i in range(len(self.baboons)):
                 predictions += baboon.predict(known_data, known_metadata, weights[:,i], self.lambda_)
         else:
-            n = len(known_data)
+           
             for j in range(len(known_data), len(known_metadata)):
                 for i in range(len(self.baboons)):
                     predictions[j-n] += baboon.predict(known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
                 known_data = pd.concat([known_data, pd.Series(predictions[j-n], index=known_data.columns).to_frame().T], ignore_index=True)
         print(known_data.columns, known_metadata.index[len(known_data):])
-        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index[n:])
+        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index)
 
         return pred_df
 
