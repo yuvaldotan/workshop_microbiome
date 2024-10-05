@@ -145,11 +145,11 @@ class superModel:
             for j in range(len(known_data), len(known_metadata)):
                 for i in range(len(self.baboons)):
                     predictions[j-n] += baboon.predict(known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
-                known_data = known_data.append(pd.Series(predictions[j-n], index = known_data.columns), ignore_index = True)
-        
-        # pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata[len(known_data):].index)
+                known_data = pd.concat([known_data, pd.Series(predictions[j-n], index=known_data.columns).to_frame().T], ignore_index=True)
+        print(known_data.columns, known_metadata.index[len(known_data):])
+        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index[n:])
 
-        return predictions
+        return pred_df
 
 def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         # calculate time difference between the last known sample and the unknown samples
