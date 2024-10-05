@@ -76,9 +76,7 @@ class BaboonModel:
 
 class superModel:
     def __init__(self, data_path, metadata_path):
-        data_df = pd.read_csv(data_path, index_col="sample")
-        metadata_df = pd.read_csv(metadata_path,  index_col="sample")
-        metadata_df["collection_date"] = (pd.to_datetime(metadata_df['collection_date']) - pd.Timestamp('1970-01-01')).dt.days
+        metadata_df, data_df = preprocessing(data_path, metadata_path)
         # create baboon models
         self.baboons = []
         for baboon_id in metadata_df["baboon_id"].unique():
@@ -177,10 +175,30 @@ def baboon_similarity(baboon1, baboon2):
 
     return presence_list
 
+def preprocessing(data_path, metadata_path):
+    """Preprocess the data and metadata files to be used in.
+    for samples from the same date and baboon_id, calculate the mean of the bacteria counts.
+    """
+    data_df = pd.read_csv(data_path)
+    metadata_df = pd.read_csv(metadata_path)
+    temp = pd.merge(data_df, metadata_df[["sample", "baboon_id", "collection_date"]], on="sample")
+    bacteria_columns = temp.columns[1:-2]  # Adjust this depending on your actual column structure
+
+    # Group by baboon_id and collection_date
+    data_clean = temp.groupby(['baboon_id', 'collection_date']).agg({**{col: 'mean' for col in bacteria_columns}, 'sample': 'first'}).reset_index()
+    data_clean.drop(['baboon_id', 'collection_date'], axis=1, inplace=True)
+    chosen_samples = data_clean["sample"].unique()
+    metadata_clean = metadata_df[metadata_df["sample"].isin(chosen_samples)]
+    metadata_clean.set_index('sample', inplace=True)
+    data_clean.set_index('sample', inplace=True)
+    metadata_df["collection_date"] = (pd.to_datetime(metadata_df['collection_date']) - pd.Timestamp('1970-01-01')).dt.days
+    return metadata_clean, data_clean
+    
+
 
 if __name__ == "__main__":
-    data_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_data.csv"
-    metadata_path = r"C:\Users\tomer\Desktop\BSc\year3\sem B\workshop_microbiome\train_metadata.csv"
+    data_path = r"train_data.csv"
+    metadata_path = r"train_metadata.csv"
     model = superModel(data_path, metadata_path)
     model.baboons = model.baboons[:3]
     model.fit()
