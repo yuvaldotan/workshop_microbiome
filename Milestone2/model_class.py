@@ -45,7 +45,7 @@ class BaboonModel:
 
             D_t1 = self.transformed_data[1:-1].values
             D_mean = self.df_cumulative_mean[:-2].values
-            cos = 0# np.cos((2*np.pi*self.delta_t[2:].values)/365)
+            cos = np.cos((2*np.pi*self.delta_t[2:].values)/365.001)
             exp = np.exp(-lambda_*self.delta_t[2:].values)
 
             f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
@@ -139,16 +139,24 @@ class superModel:
         predictions = np.zeros((len(known_metadata[len(known_data):]), 61))
         n = len(known_data)
         if not iterative:
-            for i in range(len(self.baboons)):
-                predictions += baboon.predict(known_data, known_metadata, weights[:,i], self.lambda_)
-        else:
-           
+            with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
+                futures = []
+                for i, baboon in enumerate(self.baboons):
+                    fut = executor.submit(baboon.predict, known_data, known_metadata, weights[:,i], self.lambda_, iterative)
+                    futures.append(fut)
+                for i, fut in enumerate(futures):
+                    predictions += fut.result()
+        else:           
             for j in range(len(known_data), len(known_metadata)):
-                for i in range(len(self.baboons)):
-                    predictions[j-n] += baboon.predict(known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
+                with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
+                    futures = []
+                    for i, baboon in enumerate(self.baboons):
+                        fut = executor.submit(baboon.predict, known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
+                        futures.append(fut)
+                    for i, fut in enumerate(futures):
+                        predictions[j-n] += fut.result()
                 known_data = pd.concat([known_data, pd.Series(predictions[j-n], index=known_data.columns).to_frame().T], ignore_index=True)
-        print(known_data.columns, known_metadata.index[len(known_data):])
-        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index)
+        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index[n:])
 
         return pred_df
 
@@ -165,7 +173,7 @@ def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         else:
             D_mean = np.repeat(np.mean(transformation(known_data, type = method).values[:-2], axis = 0), len(delta_t)).reshape(-1,len(delta_t)).T
 
-        cos = np.cos((2*np.pi*delta_t)/365)
+        cos = np.cos((2*np.pi*delta_t)/365.001)
         exp = np.exp(-lambda_*delta_t)
         f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
         
@@ -187,7 +195,7 @@ def iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
         else:
             D_mean = np.mean(transformation(known_data, type = method).values[:-2], axis = 0)
 
-        cos = np.cos((2*np.pi*delta_t)/365)
+        cos = np.cos((2*np.pi*delta_t)/365.001)
         exp = np.exp(-lambda_*delta_t)
         f = (exp*cos*D_t1)@alpha + ((1-exp*cos)*D_mean.T)@beta
         
