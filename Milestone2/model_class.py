@@ -91,7 +91,7 @@ class superModel:
     def fit(self):
         def objective(lambda_):
             # calculate the objective function
-            lambda_ = lambda_[0]
+            lambda_ = lambda_[0] 
             sum = 0
             futures = []
             cpus = max(1, min(multiprocessing.cpu_count() - 2, len(self.baboons)))
@@ -103,7 +103,7 @@ class superModel:
             
             for fut in futures:
                 alpha, beta,  bc = fut.result()
-                sum += bc/len(self.baboons)
+                sum += bc
 
 
             # for baboon in self.baboons:
@@ -114,7 +114,7 @@ class superModel:
         
         # optimise lambda using scipy.optimize.minimize
         
-        optimezed_lambda = minimize(lambda l: objective(l), x0 = [0], method="L-BFGS-B", bounds=[(0,1)], tol = 1e-3)
+        optimezed_lambda = minimize(lambda l: objective(l), x0 = [self.lambda_], method="L-BFGS-B", bounds=[(0,1)], tol = 1e-3)
 
         self.lambda_ = optimezed_lambda.x
         
