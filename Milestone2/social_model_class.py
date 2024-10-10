@@ -9,7 +9,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from imports import *
 
-delta_t_social_group = 7
+delta_t_social_group = 10
 delta_t_other = 7
 
 class BaboonModel:
@@ -23,7 +23,6 @@ class BaboonModel:
         self.df_cumulative_mean = self.data_I.expanding().mean()
        
         self.delta_t = self.metadata_I['collection_date'].diff()
-
         for sample in self.metadata_I.index:
             social_group = self.metadata_I.loc[sample, 'social_group']
             date = pd.to_datetime(self.metadata_I.loc[sample, 'collection_date'])
@@ -48,10 +47,6 @@ class BaboonModel:
             '''
             calculate difference between prediction and actual value using bray-curtis dissimilarity and return the mean'''
 
-
-            
-            if np.any((alpha + beta <= 1)==False):
-                return 1000
             D_meanI = self.df_cumulative_mean[:-1].values
             D_meanS = self.mean_social[1:].values
             D_meanO = self.mean_other[1:].values
@@ -64,11 +59,9 @@ class BaboonModel:
             return bc.mean()
 
         
-        # optimise alpha using scipy.optimize.minimize
-        constraint = [{'type':'ineq', 'fun':lambda beta:1- alpha - beta}]#LinearConstraint([[1, 1]]*61, [-np.inf], [1]*61)
 
         
-        optimezed_score = minimize(lambda beta: objective(alpha, beta), x0 = (1-alpha)/2 , method="COBYQA", bounds=[(0,1)]*61, constraints=constraint)
+        optimezed_score = minimize(lambda beta: objective(alpha, beta), x0 = (1-alpha)/2 , method="L-BFGS-B", bounds=[(0,1-a) for a in alpha])
 
         self.beta_ = optimezed_score.x
 
@@ -87,10 +80,17 @@ class superModel:
         metadata_df, data_df = preprocessing(data_path, metadata_path)
         # create baboon models
         self.baboons = []
-        for baboon_id in metadata_df["baboon_id"].unique():
-            baboon = BaboonModel(baboon_id, data_df, metadata_df)
+        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(metadata_df["baboon_id"].unique())))
+        futures = []
+
+        with ProcessPoolExecutor(cpus) as executor:
+                for baboon_id in metadata_df["baboon_id"].unique():
+                    futures.append(executor.submit(BaboonModel, baboon_id, data_df, metadata_df))
+        
+        for fut in futures:
+            baboon = fut.result()                  
             self.baboons.append(baboon)
-        self.alpha_ = np.array([1/3]*61)
+        self.alpha_ = np.array([0]*61)
 
     def fit(self):
         def objective(alpha):
@@ -108,7 +108,7 @@ class superModel:
                 beta,  bc = fut.result()
                 sum += bc
             
-            print(sum)
+            print(f"for alpha \n{alpha}\nscore is {sum}")
             return sum
         
         # optimise beta using scipy.optimize.minimize
