@@ -11,26 +11,33 @@ from imports import *
 
 delta_t_social_group = 10
 delta_t_other = 7
+dataless_threshold = 10
 
 class BaboonModel:
-    def __init__(self, baboon_id, data, metadata):
+    def __init__(self, baboon_id, data, metadata, fit=False, alpha = np.zeros(61)):
+        # print("init baboon model: ",baboon_id, len(metadata[metadata["baboon_id"]==baboon_id]))
         self.baboon_id = baboon_id
         self.beta_ = np.zeros(61)
-        self.metadata_I = metadata[metadata["baboon_id"]==baboon_id]
-        self.data_I = data.loc[self.metadata_I.index]
+        self.metadata_I = metadata[metadata["baboon_id"]==baboon_id].sort_values(by = 'collection_date')
+        self.data_I = data.loc[np.intersect1d(self.metadata_I.index, data.index)] # add intersection with data index
         self.mean_social = self.data_I.copy()
         self.mean_other = self.data_I.copy()
         self.df_cumulative_mean = self.data_I.expanding().mean()
        
-        self.delta_t = self.metadata_I['collection_date'].diff()
+        # self.delta_t = self.metadata_I['collection_date'].diff() # maybe in the future
         for sample in self.metadata_I.index:
             social_group = self.metadata_I.loc[sample, 'social_group']
-            date = pd.to_datetime(self.metadata_I.loc[sample, 'collection_date'])
-            self.mean_social.loc[sample] = data[(metadata['social_group'] == social_group) & (metadata["baboon_id"]!=self.baboon_id) & (abs((pd.to_datetime(metadata['collection_date']) - date).dt.days)<=delta_t_social_group)].mean()
-            self.mean_other.loc[sample] = data[(metadata['social_group'] != social_group) & (metadata["baboon_id"]!=self.baboon_id) & (abs((pd.to_datetime(metadata['collection_date']) - date).dt.days)<=delta_t_other)].mean()
+            date = self.metadata_I.loc[sample, 'collection_date']
+            social_indicies = metadata[(metadata['social_group'] == social_group) & (metadata["baboon_id"]!=self.baboon_id) & (abs((metadata['collection_date'] - date).dt.days)<=delta_t_social_group)].index
+            other_indicies = metadata[(metadata['social_group'] != social_group) & (metadata["baboon_id"]!=self.baboon_id) & (abs((metadata['collection_date'] - date).dt.days)<=delta_t_other)].index
+            self.mean_social.loc[sample] = data.loc[np.intersect1d(data.index, social_indicies)].mean()
+            self.mean_other.loc[sample] = data.loc[np.intersect1d(data.index, other_indicies)].mean()
 
         self.mean_social.fillna(0, inplace = True)
-        self.mean_other.fillna(0, inplace = True)      
+        self.mean_other.fillna(0, inplace = True)
+        if fit:
+            self.fit(alpha)  
+    
 
     
     def fit(self, alpha):
@@ -47,9 +54,9 @@ class BaboonModel:
             '''
             calculate difference between prediction and actual value using bray-curtis dissimilarity and return the mean'''
 
-            D_meanI = self.df_cumulative_mean[:-1].values
-            D_meanS = self.mean_social[1:].values
-            D_meanO = self.mean_other[1:].values
+            D_meanI = self.df_cumulative_mean.loc[self.data_I.index][:-1].values
+            D_meanS = self.mean_social.loc[self.data_I.index][1:].values
+            D_meanO = self.mean_other.loc[self.data_I.index][1:].values
 
             f = alpha*D_meanO + (1-alpha-beta)*D_meanS + beta*D_meanI
             f = to_composition(f, type = 'counts') 
@@ -69,47 +76,75 @@ class BaboonModel:
         return self.beta_, optimezed_score.fun       
 
 
-    def predict(self, other_data, other_metadata, weights,lambda_, iterative = False):
+    def predict(self, alpha, iterative = False):
+        # print(len(self.data_I), len(self.metadata_I))
         if iterative:
-            return iterative_predictor(other_data, other_metadata, self.alpha_, self.beta_, lambda_)*weights
-        return (non_iterative_predictor(other_data, other_metadata, self.alpha_, self.beta_, lambda_).T * weights).T
+            return self.iterative_predictor(alpha)
+        return self.non_iterative_predictor(alpha)
+    
+    def non_iterative_predictor(self, alpha):
+        mask = self.metadata_I[~np.isin(self.metadata_I.index,self.data_I.index)].index # sample ids to predict
+        D_I = self.data_I.mean().values
+        D_O = self.mean_other.loc[mask].values
+        D_S = self.mean_social.loc[mask].values
+
+        f = alpha*D_O + (1-alpha-self.beta_)*D_S + self.beta_*D_I
+        
+        # TODO: should we return the normalized or the transformes values?
+        f = to_composition(f, type= "counts") 
+        f_df = pd.DataFrame(f, columns = self.data_I.columns, index = mask)
+        return f_df
+    
+    
+    def iterative_predictor(self, alpha):
+        mask = self.metadata_I[~np.isin(self.metadata_I.index,self.data_I.index)].index # sample ids to predict
+        data = self.data_I.copy()
+        for sample in mask:
+            D_I = data.mean().values
+            D_O = self.mean_other.loc[sample].values
+            D_S = self.mean_social.loc[sample].values
+
+            f = alpha*D_O + (1-alpha-self.beta_)*D_S + self.beta_*D_I
+            # TODO: should we return the normalized or the transformes values?
+            f = to_composition(f.T, type= "counts") # transpose f to match the shape of D - each row is a sample
+            data.loc[sample] = f
+        return data.loc[mask]
 
 
 class superModel:
     def __init__(self, data_path, metadata_path):
-        metadata_df, data_df = preprocessing(data_path, metadata_path)
+        self.metadata_df, self.data_df = preprocessing(data_path, metadata_path)
         # create baboon models
-        self.baboons = []
-        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(metadata_df["baboon_id"].unique())))
+        self.baboons = dict()
+        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(self.metadata_df["baboon_id"].unique())))
         futures = []
 
         with ProcessPoolExecutor(cpus) as executor:
-                for baboon_id in metadata_df["baboon_id"].unique():
-                    futures.append(executor.submit(BaboonModel, baboon_id, data_df, metadata_df))
+                for baboon_id in self.metadata_df["baboon_id"].unique():
+                    futures.append(executor.submit(BaboonModel, baboon_id, self.data_df, self.metadata_df))
         
         for fut in futures:
             baboon = fut.result()                  
-            self.baboons.append(baboon)
-        self.alpha_ = np.array([0]*61)
-
+            self.baboons[baboon.baboon_id] = baboon
+        self.alpha_ = np.zeros(61)
     def fit(self):
         def objective(alpha):
             # calculate the objective function
-            sum = 0
+            bc_sum = 0
             futures = [] # process pool executor futures
             cpus = max(1, min(multiprocessing.cpu_count() - 2, len(self.baboons)))
 
             with ProcessPoolExecutor(cpus) as executor:
-                for baboon in self.baboons:
+                for baboon in self.baboons.values():
                     fut = executor.submit(baboon.fit, alpha) # execute the fit function of each baboon in parallel using the global alpha
                     futures.append(fut)
             
             for fut in futures:
                 beta,  bc = fut.result()
-                sum += bc
+                bc_sum += bc
             
-            print(f"for alpha \n{alpha}\nscore is {sum}")
-            return sum
+            # print(f"for alpha \n{alpha}\nscore is {bc_sum}")
+            return bc_sum
         
         # optimise beta using scipy.optimize.minimize
         
@@ -118,90 +153,59 @@ class superModel:
         self.alpha_ = optimezed_alpha.x
         
         return objective(self.alpha_)
+    
+    def add_new_data(self, data_path, metadata_path):
+        metadata_df, data_df = preprocessing(data_path, metadata_path)
+        baboons_to_add = metadata_df["baboon_id"].unique()
+        self.metadata_df = pd.concat([self.metadata_df, metadata_df]).sort_values(by = 'collection_date')
+        self.data_df = pd.concat([self.data_df, data_df])
+        dataless_baboons = []
+        futures = []
+        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(baboons_to_add)))
+        with ProcessPoolExecutor(cpus) as executor:
+            for baboon_id in baboons_to_add:
 
-    def predict(self,  known_data, known_metadata, iterative = False):
-        weights = np.zeros((len(self.baboons),len(known_metadata[len(known_data):])))
-        # weights = np.array([1/len(self.baboons)]*len(self.baboons))
-
-        for i, baboon in enumerate(self.baboons):
-            weights[i,:] = baboon_similarity(baboon.metadata, known_metadata[len(known_data):])
-
-        weights = weights.T
-
-        for i in range(len(weights)):
-            if weights[i].sum() == 0:
-                weights[i] = np.array([1/len(self.baboons)]*len(self.baboons))
-            else:
-                weights[i] = weights[i]/weights[i].sum()
-
-
-        predictions = np.zeros((len(known_metadata[len(known_data):]), 61))
-        n = len(known_data)
-        if not iterative:
-            with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
-                futures = []
-                for i, baboon in enumerate(self.baboons):
-                    fut = executor.submit(baboon.predict, known_data, known_metadata, weights[:,i], self.lambda_, iterative)
+                if baboon_id not in self.baboons.keys() and len(data_df.loc[np.intersect1d(metadata_df[metadata_df['baboon_id']==baboon_id].index, data_df.index)])< dataless_threshold:
+                    dataless_baboons.append(baboon_id)
+                else:
+                    fut = executor.submit(BaboonModel, baboon_id, self.data_df, self.metadata_df, fit=True, alpha = self.alpha_)
                     futures.append(fut)
-                for i, fut in enumerate(futures):
-                    predictions += fut.result()
-        else:           
-            for j in range(len(known_data), len(known_metadata)):
-                with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
-                    futures = []
-                    for i, baboon in enumerate(self.baboons):
-                        fut = executor.submit(baboon.predict, known_data, known_metadata, weights[j-n,i], self.lambda_, iterative = True)
-                        futures.append(fut)
-                    for i, fut in enumerate(futures):
-                        predictions[j-n] += fut.result()
-                known_data = pd.concat([known_data, pd.Series(predictions[j-n], index=known_data.columns).to_frame().T], ignore_index=True)
-        pred_df = pd.DataFrame(predictions, columns = known_data.columns, index=known_metadata.index[n:])
+        for fut in futures:
+            baboon = fut.result()
+            # print("baboon_id: ", baboon.baboon_id)
+            self.baboons[baboon.baboon_id] = baboon
 
-        return pred_df
+        futures = []
+        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(dataless_baboons)))
+        beta = np.mean([b.beta_ for b in self.baboons.values()], axis=0) # calculate the mean of beta for baboon with notenough data
+        with ProcessPoolExecutor(multiprocessing.cpu_count() - 2) as executor:
+            for baboon_id in dataless_baboons:
+                fut = executor.submit(BaboonModel, baboon_id, self.data_df, self.metadata_df)
+                futures.append(fut)
+        for fut in futures:
+            baboon = fut.result()
+            baboon.beta_ = beta
+            self.baboons[baboon_id] = baboon
 
-def non_iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
-        # calculate time difference between the last known sample and the unknown samples
-                
-        delta_t = known_metadata['collection_date'].values[len(known_data):] - known_metadata['collection_date'].values[len(known_data)-1]
-        # calculate the prediction for the unknown samples using the formula
+
+    def predict(self,  baboons_to_predict, iterative = False):
+        predictions = pd.DataFrame(columns=self.data_df.columns)        
+        cpus = max(1, min(multiprocessing.cpu_count() - 2, len(baboons_to_predict)))
+        futures = []
+        with ProcessPoolExecutor(cpus) as executor:
+            for baboon_id in baboons_to_predict:
+                # print("predicting: ",baboon_id)
+                if baboon_id not in self.baboons.keys():
+                    raise ValueError(f"baboon with id {baboon_id} is not in the model")
+                baboon = self.baboons[baboon_id]
+                # print(len(baboon.data_I), len(baboon.metadata_I))
+                fut = executor.submit(baboon.predict, self.alpha_, iterative)
+                futures.append(fut)
         
-        D_t1 = np.repeat(transformation(known_data, type = method).values[-1], len(delta_t)).reshape(-1,len(delta_t)).T
+        for fut in futures:
+            predictions = pd.concat([predictions, fut.result()])
+        return predictions
 
-        if len(known_data)<=2:
-            D_mean = np.repeat(transformation(known_data, type = method).values[0], len(delta_t)).reshape(-1,len(delta_t)).T
-        else:
-            D_mean = np.repeat(np.mean(transformation(known_data, type = method).values[:-2], axis = 0), len(delta_t)).reshape(-1,len(delta_t)).T
-
-        cos = np.cos((2*np.pi*delta_t)/365.001)
-        exp = np.exp(-lambda_*delta_t)
-        f = alpha@(exp*cos*D_t1.T) + beta@((1-exp*cos)*D_mean.T)
-        
-        # TODO: should we return the normalized or the transformes values?
-        f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
-
-        return f
-
-
-def iterative_predictor(known_data, known_metadata, alpha, beta, lambda_):
-        # calculate time difference between the last known sample and the unknown samples
-                
-        delta_t = known_metadata['collection_date'].values[len(known_data)] - known_metadata['collection_date'].values[len(known_data)-1]
-        # calculate the prediction for the unknown samples using the formula
-
-        D_t1 = transformation(known_data, type = method).values[-1]
-        if len(known_data)<=2:
-            D_mean = transformation(known_data, type = method).values[0]
-        else:
-            D_mean = np.mean(transformation(known_data, type = method).values[:-2], axis = 0)
-
-        cos = np.cos((2*np.pi*delta_t)/365.001)
-        exp = np.exp(-lambda_*delta_t)
-        f = (exp*cos*D_t1)@alpha + ((1-exp*cos)*D_mean.T)@beta
-        
-        # TODO: should we return the normalized or the transformes values?
-        f = to_composition(f.T, type= method) # transpose f to match the shape of D - each row is a sample
-
-        return f
 
 
 def baboon_similarity(baboon1, baboon2):
@@ -229,10 +233,14 @@ def preprocessing(data_path, metadata_path):
     data_clean = temp.groupby(['baboon_id', 'collection_date']).agg({**{col: 'mean' for col in bacteria_columns}, 'sample': 'first'}).reset_index()
     data_clean.drop(['baboon_id', 'collection_date'], axis=1, inplace=True)
     chosen_samples = data_clean["sample"].unique()
-    metadata_clean = metadata_df[metadata_df["sample"].isin(chosen_samples)]
+
+    # to drop = data_idx - chosen samples
+    # metadata_idx.drop (to_drop)
+    to_drop = data_df[~data_df["sample"].isin(chosen_samples)].index
+    metadata_clean = metadata_df.drop(to_drop)
     metadata_clean.set_index('sample', inplace=True)
     data_clean.set_index('sample', inplace=True)
-    metadata_clean["collection_date"] = (pd.to_datetime(metadata_clean['collection_date']) - pd.Timestamp('1970-01-01')).dt.days
+    metadata_clean['collection_date'] = pd.to_datetime(metadata_clean['collection_date'])
     return metadata_clean, data_clean
     
 
