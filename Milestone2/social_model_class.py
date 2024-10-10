@@ -244,21 +244,3 @@ def preprocessing(data_path, metadata_path):
     return metadata_clean, data_clean
     
 
-
-if __name__ == "__main__":
-    data_path = r"train_data.csv"
-    metadata_path = r"train_metadata.csv"
-    model = superModel(data_path, metadata_path)
-    # model.baboons = model.baboons[:3]
-    # model.fit()
-    print(model.lambda_)
-    for baboon in model.baboons:
-        baboon.alpha_ = np.zeros([61,61])
-        baboon.beta_ = np.eye(61,61)
-    baboons = model.baboons
-    model.baboons = model.baboons[:60]
-    Baboon_78 = baboons[-2]
-    baboon_78_data = Baboon_78.data[2:]
-    Baboon_78.data = Baboon_78.data[:2]
-    iterative_res = model.predict(Baboon_78.data, Baboon_78.metadata, iterative=True)
-    noninterative_res = model.predict(Baboon_78.data, Baboon_78.metadata, iterative=False)
