@@ -157,7 +157,9 @@ class superModel:
     def add_new_data(self, data_path, metadata_path):
         metadata_df, data_df = preprocessing(data_path, metadata_path)
         baboons_to_add = metadata_df["baboon_id"].unique()
+        
         self.metadata_df = pd.concat([self.metadata_df, metadata_df]).sort_values(by = 'collection_date')
+        
         self.data_df = pd.concat([self.data_df, data_df])
         dataless_baboons = []
         futures = []
@@ -185,7 +187,7 @@ class superModel:
         for fut in futures:
             baboon = fut.result()
             baboon.beta_ = beta
-            self.baboons[baboon_id] = baboon
+            self.baboons[baboon.baboon_id] = baboon
 
 
     def predict(self,  baboons_to_predict, iterative = False):
@@ -232,14 +234,17 @@ def preprocessing(data_path, metadata_path):
     # Group by baboon_id and collection_date
     data_clean = temp.groupby(['baboon_id', 'collection_date']).agg({**{col: 'mean' for col in bacteria_columns}, 'sample': 'first'}).reset_index()
     data_clean.drop(['baboon_id', 'collection_date'], axis=1, inplace=True)
-    chosen_samples = data_clean["sample"].unique()
+    data_clean.set_index('sample', inplace=True)
 
     # to drop = data_idx - chosen samples
     # metadata_idx.drop (to_drop)
-    to_drop = data_df[~data_df["sample"].isin(chosen_samples)].index
-    metadata_clean = metadata_df.drop(to_drop)
+
+
+    to_drop = data_df[~data_df['sample'].isin(data_clean.index)]["sample"].values
+
+    metadata_clean = metadata_df[~metadata_df["sample"].isin(to_drop)]    
     metadata_clean.set_index('sample', inplace=True)
-    data_clean.set_index('sample', inplace=True)
+
     metadata_clean['collection_date'] = pd.to_datetime(metadata_clean['collection_date'])
     return metadata_clean, data_clean
     
