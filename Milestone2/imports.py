@@ -34,6 +34,7 @@ def to_composition(arr, type = 'counts'):
         if arr.ndim == 1:
             total_sum = arr.sum()
             if total_sum == 0:  # Avoid division by zero
+                # print(arr)
                 return np.zeros_like(arr)
             return arr / total_sum
         

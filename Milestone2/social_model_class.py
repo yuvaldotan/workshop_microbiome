@@ -36,7 +36,7 @@ class BaboonModel:
         self.mean_social.fillna(0, inplace = True)
         self.mean_other.fillna(0, inplace = True)
         if fit:
-            self.fit(gamma, alpha)  
+            self.fit(alpha)  
     
 
     
@@ -182,14 +182,14 @@ class superModel:
 
         futures = []
         cpus = max(1, min(multiprocessing.cpu_count() - 2, len(dataless_baboons)))
-        beta = np.mean([b.beta_ for b in self.baboons.values()], axis=0) # calculate the mean of beta for baboon with notenough data
+        mean_beta = np.mean([b.beta_ for b in self.baboons.values()], axis=0) # calculate the mean of beta for baboon with notenough data
         with ProcessPoolExecutor(multiprocessing.cpu_count() - 2) as executor:
             for baboon_id in dataless_baboons:
                 fut = executor.submit(BaboonModel, baboon_id, self.data_df, self.metadata_df)
                 futures.append(fut)
         for fut in futures:
             baboon = fut.result()
-            baboon.beta_ = beta
+            baboon.beta_ = mean_beta
             self.baboons[baboon.baboon_id] = baboon
 
 
