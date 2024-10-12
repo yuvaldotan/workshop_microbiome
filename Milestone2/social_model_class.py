@@ -14,12 +14,12 @@ delta_t_other = 7
 dataless_threshold = 10
 
 class BaboonModel:
-    def __init__(self, baboon_id, data, metadata, fit=False, alpha = np.zeros(61)):
+    def __init__(self, baboon_id, data, metadata, fit=False, gamma =0, alpha = np.zeros(61)):
         # print("init baboon model: ",baboon_id, len(metadata[metadata["baboon_id"]==baboon_id]))
         self.baboon_id = baboon_id
         self.beta_ = np.zeros(61)
         self.metadata_I = metadata[metadata["baboon_id"]==baboon_id].sort_values(by = 'collection_date')
-        self.data_I = data.loc[np.intersect1d(self.metadata_I.index, data.index)] # add intersection with data index
+        self.data_I = data.loc[[idx for idx in self.metadata_I.index if idx in data.index]] # add intersection with data index
         self.mean_social = self.data_I.copy()
         self.mean_other = self.data_I.copy()
         self.df_cumulative_mean = self.data_I.expanding().mean()
@@ -36,12 +36,17 @@ class BaboonModel:
         self.mean_social.fillna(0, inplace = True)
         self.mean_other.fillna(0, inplace = True)
         if fit:
-            self.fit(alpha)  
+            self.fit(gamma, alpha)  
     
 
     
     def fit(self, alpha):
         # calculate optimised alpha for a given lambda
+
+        D_meanI = self.df_cumulative_mean.loc[self.data_I.index][:-1].values
+        D_meanS = self.mean_social.loc[self.data_I.index][1:].values
+        D_meanO = self.mean_other.loc[self.data_I.index][1:].values
+
         def objective(alpha, beta):
             # calculate the objective function
 
@@ -54,9 +59,7 @@ class BaboonModel:
             '''
             calculate difference between prediction and actual value using bray-curtis dissimilarity and return the mean'''
 
-            D_meanI = self.df_cumulative_mean.loc[self.data_I.index][:-1].values
-            D_meanS = self.mean_social.loc[self.data_I.index][1:].values
-            D_meanO = self.mean_other.loc[self.data_I.index][1:].values
+            
 
             f = alpha*D_meanO + (1-alpha-beta)*D_meanS + beta*D_meanI
             f = to_composition(f, type = 'counts') 
