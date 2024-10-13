@@ -114,7 +114,7 @@ class BaboonModel:
             self.data_I.loc[sample] = f
         res = self.data_I.loc[mask]
         self.data_I = data
-        data.to_csv(f"res{self.baboon_id}.csv")
+        # data.to_csv(f"res{self.baboon_id}.csv")
         return res
     
 
